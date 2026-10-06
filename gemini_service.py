@@ -1,6 +1,5 @@
 import os
 import sys
-import time
 import logging
 from typing import Dict, Optional
 from dotenv import load_dotenv
@@ -18,22 +17,22 @@ if sys.platform == "win32":
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-# 模型優先順序列表（若遇暫時性負載高峰，自動依序容錯切換）
-AVAILABLE_MODELS = ["gemini-3.5-flash", "gemini-3.8-flash", "gemini-3.5-flash-lite"]
 DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+AVAILABLE_MODELS = [DEFAULT_MODEL]
 
 SYSTEM_INSTRUCTION = (
     "你是一位親切、樂於助人的繁體中文 AI 智慧助理。"
     "請一律使用台灣繁體中文（zh-TW）回答。"
     "回答風格請保持清晰、精準且排版易讀（適當使用分段或條列說明）。"
     "考量手機 LINE 聊天室的閱讀體驗，回覆請保持簡明扼要，避免過多無意義的廢話。"
+    "若未使用網路搜尋，遇到最新或需要查證的資訊時，請明確說明無法確認，不要捏造具體姓名、職稱或資料。"
 )
 
 class GeminiService:
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY", "").strip()
         self.web_search_enabled = os.getenv(
-            "GEMINI_WEB_SEARCH", "true"
+            "GEMINI_WEB_SEARCH", "false"
         ).strip().lower() not in {"0", "false", "no", "off"}
         self.client: Optional[genai.Client] = None
         self._user_chats: Dict[str, any] = {}
@@ -45,7 +44,13 @@ class GeminiService:
         self.api_key = os.getenv("GEMINI_API_KEY", "").strip()
         if self.api_key and self.api_key != "your_gemini_api_key_here":
             try:
-                self.client = genai.Client(api_key=self.api_key)
+                self.client = genai.Client(
+                    api_key=self.api_key,
+                    http_options=types.HttpOptions(
+                        timeout=35000,
+                        retry_options=types.HttpRetryOptions(attempts=1),
+                    ),
+                )
                 logger.info(f"Google Gemini Client 初始化成功！預設模型: {self.current_model}")
             except Exception as e:
                 logger.error(f"Gemini Client 初始化失敗: {e}")
@@ -90,7 +95,7 @@ class GeminiService:
         return self._user_chats[cache_key]
 
     def generate_reply(self, user_id: str, prompt: str) -> str:
-        """接收使用者訊息並生成 AI 回覆，具備智慧容錯切換"""
+        """接收使用者訊息並在有限時間內生成 AI 回覆"""
         if not self.is_configured():
             self._init_client()
 
@@ -104,8 +109,8 @@ class GeminiService:
         if not prompt_clean:
             return "請問有什麼我可以協助您的嗎？😊"
 
-        # 優先使用 Google Search grounding；若帳戶或模型不支援，改用一般回答，
-        # 並明確提醒使用者內容可能不是最新資訊。
+        # 只嘗試一個模型，並由 HTTP timeout 限制等待時間，盡量在 LINE reply token
+        # 的有效時間內完成回覆。
         last_error = None
         for model in AVAILABLE_MODELS:
             try:
@@ -143,26 +148,23 @@ class GeminiService:
 
             except Exception as e:
                 last_error = e
-                logger.warning(f"模型 {model} 呼叫異常: {e}，嘗試切換備援模型...")
+                logger.warning(f"模型 {model} 呼叫異常: {e}")
                 # 清理異常 session
                 self.clear_chat(user_id)
-                time.sleep(0.5)
 
-        # 搜尋 grounding 可能因 API 方案或暫時性服務問題無法使用；
-        # 仍嘗試提供一般回答，避免整個對話失效。
-        if not self.web_search_enabled:
-            logger.error("GEMINI_WEB_SEARCH 已關閉，且一般 Gemini 回覆也失敗")
-            return "抱歉，目前 AI 服務忙線中，請稍後再試一次！"
-        try:
-            chat = self.get_or_create_chat(
-                user_id, model_name=self.current_model, enable_search=False
-            )
-            response = chat.send_message(prompt_clean)
-            reply_text = response.text or "（AI 未回傳任何文字）"
-            reply_text = "⚠️ 即時搜尋目前無法使用，以下回答可能不是最新資訊。\n\n" + reply_text
-            return reply_text[:4400].strip()
-        except Exception as e:
-            last_error = e
+        # 若啟用的網路搜尋因 API 方案或服務問題無法使用，再嘗試一般回答。
+        # 預設關閉搜尋以避免意外產生搜尋 grounding 費用。
+        if self.web_search_enabled:
+            try:
+                chat = self.get_or_create_chat(
+                    user_id, model_name=self.current_model, enable_search=False
+                )
+                response = chat.send_message(prompt_clean)
+                reply_text = response.text or "（AI 未回傳任何文字）"
+                reply_text = "⚠️ 即時搜尋目前無法使用，以下回答可能不是最新資訊。\n\n" + reply_text
+                return reply_text[:4400].strip()
+            except Exception as e:
+                last_error = e
 
         logger.error(f"所有模型嘗試均失敗，最後錯誤: {last_error}", exc_info=True)
         return "抱歉，目前 AI 伺服器忙線中，請稍後片刻再試一次！"
