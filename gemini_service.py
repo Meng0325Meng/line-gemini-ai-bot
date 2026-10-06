@@ -32,6 +32,9 @@ SYSTEM_INSTRUCTION = (
 class GeminiService:
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        self.web_search_enabled = os.getenv(
+            "GEMINI_WEB_SEARCH", "true"
+        ).strip().lower() not in {"0", "false", "no", "off"}
         self.client: Optional[genai.Client] = None
         self._user_chats: Dict[str, any] = {}
         self.current_model = DEFAULT_MODEL
@@ -56,19 +59,28 @@ class GeminiService:
 
     def clear_chat(self, user_id: str) -> bool:
         """清除指定使用者的歷史對話記憶"""
-        if user_id in self._user_chats:
-            del self._user_chats[user_id]
-            return True
-        return False
+        # Chat cache keys also contain the model name (user_id_model_name).
+        keys = [key for key in self._user_chats if key.startswith(f"{user_id}_")]
+        for key in keys:
+            del self._user_chats[key]
+        return bool(keys)
 
-    def get_or_create_chat(self, user_id: str, model_name: str = None):
+    def get_or_create_chat(
+        self, user_id: str, model_name: str = None, enable_search: bool = True
+    ):
         """取得或建立使用者的對話 Session"""
         model = model_name or self.current_model
-        cache_key = f"{user_id}_{model}"
+        search_suffix = "search" if enable_search else "no_search"
+        cache_key = f"{user_id}_{model}_{search_suffix}"
         if cache_key not in self._user_chats:
             config = types.GenerateContentConfig(
                 system_instruction=SYSTEM_INSTRUCTION,
                 temperature=0.7,
+                tools=(
+                    [types.Tool(google_search=types.GoogleSearch())]
+                    if enable_search
+                    else None
+                ),
             )
             chat = self.client.chats.create(
                 model=model,
@@ -92,13 +104,36 @@ class GeminiService:
         if not prompt_clean:
             return "請問有什麼我可以協助您的嗎？😊"
 
-        # 嘗試主要模型與備援模型
+        # 優先使用 Google Search grounding；若帳戶或模型不支援，改用一般回答，
+        # 並明確提醒使用者內容可能不是最新資訊。
         last_error = None
         for model in AVAILABLE_MODELS:
             try:
-                chat = self.get_or_create_chat(user_id, model_name=model)
+                chat = self.get_or_create_chat(
+                    user_id,
+                    model_name=model,
+                    enable_search=self.web_search_enabled,
+                )
                 response = chat.send_message(prompt_clean)
                 reply_text = response.text or "（AI 未回傳任何文字）"
+
+                # 把 Gemini 搜尋 grounding metadata 中的網頁來源一起回給使用者。
+                sources = []
+                candidates = getattr(response, "candidates", None) or []
+                if candidates:
+                    metadata = getattr(candidates[0], "grounding_metadata", None)
+                    for chunk in getattr(metadata, "grounding_chunks", None) or []:
+                        web_source = getattr(chunk, "web", None)
+                        url = getattr(web_source, "uri", None)
+                        if url and url not in [source[1] for source in sources]:
+                            title = getattr(web_source, "title", None) or "資料來源"
+                            sources.append((title, url))
+                        if len(sources) >= 3:
+                            break
+                if sources:
+                    reply_text += "\n\n參考來源：\n" + "\n".join(
+                        f"{title}：{url}" for title, url in sources
+                    )
 
                 # LINE 限制單則文字上限 5000 字元
                 if len(reply_text) > 4500:
@@ -112,6 +147,22 @@ class GeminiService:
                 # 清理異常 session
                 self.clear_chat(user_id)
                 time.sleep(0.5)
+
+        # 搜尋 grounding 可能因 API 方案或暫時性服務問題無法使用；
+        # 仍嘗試提供一般回答，避免整個對話失效。
+        if not self.web_search_enabled:
+            logger.error("GEMINI_WEB_SEARCH 已關閉，且一般 Gemini 回覆也失敗")
+            return "抱歉，目前 AI 服務忙線中，請稍後再試一次！"
+        try:
+            chat = self.get_or_create_chat(
+                user_id, model_name=self.current_model, enable_search=False
+            )
+            response = chat.send_message(prompt_clean)
+            reply_text = response.text or "（AI 未回傳任何文字）"
+            reply_text = "⚠️ 即時搜尋目前無法使用，以下回答可能不是最新資訊。\n\n" + reply_text
+            return reply_text[:4400].strip()
+        except Exception as e:
+            last_error = e
 
         logger.error(f"所有模型嘗試均失敗，最後錯誤: {last_error}", exc_info=True)
         return "抱歉，目前 AI 伺服器忙線中，請稍後片刻再試一次！"

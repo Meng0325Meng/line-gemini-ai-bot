@@ -1,6 +1,8 @@
 import os
 import sys
 import logging
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 from flask import Flask, request, abort, jsonify
 from dotenv import load_dotenv
 
@@ -34,6 +36,7 @@ from linebot.v3.messaging import (
     ApiClient,
     MessagingApi,
     ReplyMessageRequest,
+    PushMessageRequest,
     TextMessage
 )
 from linebot.v3.webhooks import (
@@ -61,6 +64,9 @@ if not is_line_configured:
 
 configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN or "dummy_token")
 handler = WebhookHandler(LINE_CHANNEL_SECRET or "dummy_secret")
+background_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="line-ai")
+_user_locks_guard = Lock()
+_user_locks = {}
 
 @app.route("/", methods=["GET"])
 def index():
@@ -148,7 +154,13 @@ def callback():
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_text_message(event):
     """處理文字訊息事件"""
-    user_id = event.source.user_id if event.source else "default_user"
+    source = event.source
+    push_target = (
+        getattr(source, "user_id", None)
+        or getattr(source, "group_id", None)
+        or getattr(source, "room_id", None)
+    )
+    user_id = push_target or "default_user"
     user_text = event.message.text.strip()
     logger.info(f"收到來自 [{user_id}] 的文字訊息: {user_text}")
 
@@ -168,8 +180,8 @@ def handle_text_message(event):
     elif user_text.lower() in ["/ping", "ping"]:
         reply_content = "🏓 Pong! LINE AI 機器人連線與服務運作正常！"
     else:
-        # 交由 Gemini 生成自然語言回覆
-        reply_content = gemini_service.generate_reply(user_id=user_id, prompt=user_text)
+        # 先在 reply token 有效期間內確認收到，再背景查詢並以 push message 傳回答案。
+        reply_content = "收到，我正在查詢資料，稍後會把答案傳給你。"
 
     # 回覆使用者訊息
     try:
@@ -184,6 +196,35 @@ def handle_text_message(event):
         logger.info(f"已成功回覆使用者 [{user_id}]")
     except Exception as e:
         logger.error(f"發送 LINE 回覆訊息失敗: {e}", exc_info=True)
+
+    # AI 查詢可能超過 LINE reply token 的有效時間，因此答案改用 push message 發送。
+    if user_text.lower() not in ["/help", "說明", "幫助", "help", "功能",
+                                 "/clear", "清除", "重設", "clear", "/ping", "ping"]:
+        if not push_target:
+            logger.error("Webhook 事件沒有可用的 LINE user/group/room ID，無法傳送後續答案")
+            return
+        background_executor.submit(_generate_and_push, user_id, push_target, user_text)
+
+
+def _generate_and_push(user_id: str, push_target: str, prompt: str):
+    """在背景產生答案，避免等待 Gemini 時耗盡 LINE reply token。"""
+    try:
+        # 同一位使用者共用 Gemini 對話記憶，避免多個背景請求同時操作同一個 session。
+        with _user_locks_guard:
+            user_lock = _user_locks.setdefault(user_id, Lock())
+        with user_lock:
+            reply_content = gemini_service.generate_reply(user_id=user_id, prompt=prompt)
+            with ApiClient(configuration) as api_client:
+                line_bot_api = MessagingApi(api_client)
+                line_bot_api.push_message(
+                    PushMessageRequest(
+                        to=push_target,
+                        messages=[TextMessage(text=reply_content)],
+                    )
+                )
+        logger.info(f"已透過 push message 傳送 AI 回覆給 [{user_id}]")
+    except Exception as e:
+        logger.error(f"背景產生或傳送 AI 回覆失敗 [{user_id}]: {e}", exc_info=True)
 
 if __name__ == "__main__":
     logger.info(f"啟動 LINE AI Bot 伺服器，監聽連接埠: {PORT} ...")

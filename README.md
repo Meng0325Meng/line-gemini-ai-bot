@@ -1,6 +1,6 @@
 # 🤖 LINE AI 智慧對話機器人 (Python + Gemini + Flask)
 
-這是一個輕量、易擴充的 LINE 智慧對話機器人，整合了 **Google Gemini API** (`gemini-2.5-flash`) 與 **LINE Messaging API (SDK v3)**。在 LINE 中傳送訊息即可獲得親切、聰明的繁體中文 AI 即時解答與對話支援！
+這是一個輕量、易擴充的 LINE 智慧對話機器人，整合 **Google Gemini API** 與 **LINE Messaging API (SDK v3)**。支援 Gemini Google 搜尋 grounding，並在背景完成較慢的查詢後傳回答案。
 
 ---
 
@@ -61,9 +61,16 @@ LINE_CHANNEL_ACCESS_TOKEN=你的_LINE_CHANNEL_ACCESS_TOKEN
 # Gemini API Key
 GEMINI_API_KEY=你的_GEMINI_API_KEY
 
+# Gemini Google 搜尋 grounding（需要支援此功能的 API 方案；可能產生使用費）
+GEMINI_WEB_SEARCH=true
+
 # 伺服器通訊埠 (預設 5000)
 PORT=5000
 ```
+
+開啟 Google 搜尋後，Gemini 會視問題需要查詢網頁並附上來源。若帳戶方案不支援搜尋，機器人會改用一般模型回答，並提醒內容可能不是最新；將 `GEMINI_WEB_SEARCH=false` 可關閉搜尋。
+
+AI 問題會先收到「正在查詢」的確認訊息，稍後再收到正式答案。正式答案使用 LINE push message 傳送；LINE 的訊息額度可能因此增加。Google Search grounding 也有自己的用量與費用規則，請先確認 Gemini API 方案與帳務設定。
 
 ---
 
@@ -120,7 +127,7 @@ ngrok 會產生一組 Forwarding 網址，例如：`https://abc1234.ngrok-free.a
 
 | 指令 | 說明 |
 | :--- | :--- |
-| 直接輸入文字 | 與 Gemini AI 進行多輪對話與諮詢 |
+| 直接輸入文字 | 與 Gemini AI 進行多輪對話與諮詢；需要時使用 Google 搜尋並附上來源 |
 | `/help` 或 `說明` | 顯示功能介紹與可用指令說明 |
 | `/clear` 或 `清除` | 清空當前與 AI 的對話歷史記憶，重新開啟新話題 |
 | `/ping` | 測試機器人伺服器連線與心跳反應 |
@@ -141,5 +148,6 @@ ngrok 會產生一組 Forwarding 網址，例如：`https://abc1234.ngrok-free.a
    - `LINE_CHANNEL_SECRET`
    - `LINE_CHANNEL_ACCESS_TOKEN`
    - `GEMINI_API_KEY`
+   - `GEMINI_WEB_SEARCH`（選填，預設 `true`）
    - `PORT`: `5000`
 5. 部署完成後，取得 Render 給予的網址（如 `https://my-line-bot.onrender.com`），將 LINE Developers 後台的 Webhook URL 修改為 `https://my-line-bot.onrender.com/callback` 即可！
