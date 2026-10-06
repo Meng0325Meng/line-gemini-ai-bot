@@ -136,18 +136,12 @@ ngrok 會產生一組 Forwarding 網址，例如：`https://abc1234.ngrok-free.a
 
 ## ☁️ 雲端 24 小時上線部署建議（Render 免費方案）
 
-若希望關閉電腦後機器人依然能 24 小時自動回覆，可免費部署至 [Render](https://render.com/)：
+若希望程式放在雲端，並在推送至 GitHub `main` 分支時自動更新，可使用 [Render](https://render.com/) 免費 Web Service。專案已附 `render.yaml`，建立 Blueprint 時會依照設定建置並啟用自動部署：
 
-1. 將專案上傳至您的 **GitHub**（記得確認 `.env` 沒有被推上去）。
-2. 在 Render 選擇 **New Web Service**，連接您的 GitHub Repository。
-3. 填入設定：
-   - **Environment**: `Python 3`
-   - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `python app.py`
-4. 在 **Environment Variables** 分頁新增：
-   - `LINE_CHANNEL_SECRET`
-   - `LINE_CHANNEL_ACCESS_TOKEN`
-   - `GEMINI_API_KEY`
-   - `GEMINI_WEB_SEARCH`（選填，預設 `false`；開啟可能產生 API 費用）
-   - `PORT`: `5000`
-5. 部署完成後，取得 Render 給予的網址（如 `https://my-line-bot.onrender.com`），將 LINE Developers 後台的 Webhook URL 修改為 `https://my-line-bot.onrender.com/callback` 即可！
+1. 在 Render 選擇 **New > Blueprint**，連結 GitHub 並選擇 `Meng0325Meng/line-gemini-ai-bot`。
+2. Render 讀取根目錄的 `render.yaml` 後，選擇免費方案並建立服務。
+3. 在 Render 提示的環境變數欄位填入 `LINE_CHANNEL_SECRET`、`LINE_CHANNEL_ACCESS_TOKEN`、`GEMINI_API_KEY`。金鑰只填在 Render，不要放進 GitHub 或 `render.yaml`。
+4. 部署完成後，取得 Render 網址，例如 `https://line-gemini-ai-bot.onrender.com`，到 LINE Developers Console 將 Webhook URL 改成 `https://你的Render網址/callback`，按 **Update** 再按 **Verify**。
+5. Render 連結 GitHub `main` 分支後，之後每次推送都會自動建置和部署。
+
+免費 Web Service 閒置 15 分鐘後會休眠，收到下一個請求時才喚醒，可能需要約一分鐘；因此適合課堂作業或展示，不保證第一則訊息即時回覆。Render 免費方案在用量超出時會停用服務，而不是在沒有付款方式時自動收費；請在建立服務時確認選的是 **Free**。Gemini API 的用量/費用仍與個人 Gemini 會員分開。

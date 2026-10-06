@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: line-gemini-ai-bot
+    runtime: python
+    plan: free
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    healthCheckPath: /
+    autoDeployTrigger: commit
+    envVars:
+      - key: GEMINI_WEB_SEARCH
+        value: "false"
+      - key: LINE_CHANNEL_SECRET
+        sync: false
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
