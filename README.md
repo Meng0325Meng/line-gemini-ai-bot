@@ -145,3 +145,23 @@ ngrok 會產生一組 Forwarding 網址，例如：`https://abc1234.ngrok-free.a
 5. Render 連結 GitHub `main` 分支後，之後每次推送都會自動建置和部署。
 
 免費 Web Service 閒置 15 分鐘後會休眠，收到下一個請求時才喚醒，可能需要約一分鐘；因此適合課堂作業或展示，不保證第一則訊息即時回覆。Render 免費方案在用量超出時會停用服務，而不是在沒有付款方式時自動收費；請在建立服務時確認選的是 **Free**。Gemini API 的用量/費用仍與個人 Gemini 會員分開。
+
+---
+
+## 🧪 實測證明（2026-10-10）
+
+### LINE Bot 收到訊息並處理 Gemini 暫時忙線
+
+Render 服務日誌記錄到測試訊息「早安」及後續處理結果（使用者識別碼已省略）：
+
+```text
+14:12:33 INFO  line_bot: 收到文字訊息「早安」
+14:12:50 INFO  Gemini API: HTTP 503 Service Unavailable
+14:12:50 ERROR gemini_service: 503 UNAVAILABLE — Gemini 目前需求量高
+14:12:51 INFO  line_bot: 已成功回覆使用者
+14:12:51 INFO  POST /callback HTTP/1.1 200
+```
+
+**結果：** LINE Webhook 有收到訊息。當 Gemini 回傳 503 時，程式改回傳忙線提示；日誌顯示 LINE 回覆 API 呼叫成功，Webhook 也以 HTTP 200 結束。這筆紀錄同時呈現正常接收與 Gemini 暫時忙線的處理情形。
+
+> 實際日誌由 Render Dashboard 擷取；為保護使用者隱私，公開紀錄省略 LINE 使用者識別碼。Render 原始日誌需要登入才能檢視。
