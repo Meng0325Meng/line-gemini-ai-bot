@@ -5,6 +5,7 @@ from typing import Dict, Optional
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from ndhu_teacher_data import get_public_teacher_context
 
 # 處理 Windows 終端編碼
 if sys.platform == "win32":
@@ -109,6 +110,18 @@ class GeminiService:
         if not prompt_clean:
             return "請問有什麼我可以協助您的嗎？😊"
 
+        teacher_source = get_public_teacher_context(prompt_clean)
+        if teacher_source:
+            prompt_clean = (
+                f"使用者問題：{prompt_clean}\n\n"
+                "以下是從國立東華大學公開教師頁面取得的資料。回答教師身分、"
+                "職稱、學經歷或課程時，優先依據這些資料；資料沒有提到的部分請明確說明，"
+                "不要自行補造。\n"
+                f"資料標題：{teacher_source['title']}\n"
+                f"官方來源：{teacher_source['url']}\n"
+                f"公開頁面內容：{teacher_source['text']}"
+            )
+
         # 只嘗試一個模型，並由 HTTP timeout 限制等待時間，盡量在 LINE reply token
         # 的有效時間內完成回覆。
         last_error = None
@@ -121,6 +134,9 @@ class GeminiService:
                 )
                 response = chat.send_message(prompt_clean)
                 reply_text = response.text or "（AI 未回傳任何文字）"
+
+                if teacher_source and teacher_source["url"] not in reply_text:
+                    reply_text += f"\n\n東華官方資料：{teacher_source['url']}"
 
                 # 把 Gemini 搜尋 grounding metadata 中的網頁來源一起回給使用者。
                 sources = []
@@ -161,6 +177,9 @@ class GeminiService:
                 )
                 response = chat.send_message(prompt_clean)
                 reply_text = response.text or "（AI 未回傳任何文字）"
+
+                if teacher_source and teacher_source["url"] not in reply_text:
+                    reply_text += f"\n\n東華官方資料：{teacher_source['url']}"
                 reply_text = "⚠️ 即時搜尋目前無法使用，以下回答可能不是最新資訊。\n\n" + reply_text
                 return reply_text[:4400].strip()
             except Exception as e:
