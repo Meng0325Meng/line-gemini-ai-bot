@@ -1,21 +1,31 @@
-# 🤖 LINE AI 智慧對話機器人 (Python + Gemini + Flask)
+# 🤖 LINE AI 智慧對話機器人（Apps Script + Gemini）
 
-這是一個輕量、易擴充的 LINE 智慧對話機器人，整合 **Google Gemini API** 與 **LINE Messaging API (SDK v3)**。預設使用 Gemini 一般文字 API，不啟用可能產生費用的網路搜尋 grounding。
+這是課堂專題用的 LINE AI 機器人，整合 **Google Apps Script、Gemini API** 和 **LINE Messaging API**。目前 LINE Webhook 指向 Apps Script Web App；Python/Flask 版保留為替代轉接站。預設使用 Gemini 一般文字 API，不啟用可能產生額外費用的網路搜尋 grounding。
+
+## 專題修改內容
+
+- 以 Apps Script 接收 LINE Webhook，使用 Gemini API 產生繁體中文回答。
+- 加入東華大學陳文盛老師的公開資料查詢，回答附上東華官方來源；取不到網頁時提供標示過的備援介紹。
+- 修正 Apps Script 使用 `ContentService` 回覆時造成的 HTTP 302，改用 `HtmlService.createHtmlOutput()`。LINE Developers Console Webhook Verify 與 `/ping` 已實測成功。
+- 加入 `/help`、`/clear`、`/ping`，並為教師查詢保留不含使用者 ID 的 Apps Script 執行紀錄，供課堂實測截圖。
 
 ---
 
 ## 📁 專案檔案結構
 
 ```
-1005/
-├── app.py              # Flask Web 應用主程式，負責接收與驗證 LINE Webhook 事件
-├── gemini_service.py   # Gemini AI 服務封裝（支援 System Prompt、多輪對話記憶）
-├── test_local.py       # 本地免部署測試腳本（CLI 對話測試 & Webhook 模擬）
-├── requirements.txt    # 專案依賴套件清單
-├── .env.example        # 環境變數範本檔
-├── .env                # 實際環境變數設定檔（放置金鑰）
-├── .gitignore          # Git 忽略清單（避免金鑰上傳）
-└── README.md           # 完整使用與部署教學
+line-gemini-ai-bot/
+├── apps-script/
+│   ├── Code.gs             # 目前使用的 Apps Script LINE Webhook 與 Gemini 程式
+│   └── 部署說明.md          # Apps Script 指令碼屬性、部署與驗證步驟
+├── app.py                  # Flask 替代轉接站，接收及驗證 LINE Webhook
+├── gemini_service.py       # Gemini API、多輪對話及教師資料上下文
+├── ndhu_teacher_data.py    # 東華公開教師頁面擷取與來源處理
+├── test_local.py           # 本地測試工具
+├── requirements.txt        # Python 套件清單
+├── render.yaml             # Render 替代部署設定
+├── .env.example            # 環境變數範本（不含金鑰）
+└── README.md               # 安裝、執行、部署與修改紀錄
 ```
 
 ---
@@ -120,6 +130,26 @@ ngrok 會產生一組 Forwarding 網址，例如：`https://abc1234.ngrok-free.a
 4. 將下方的 **Use Webhook** 開關切換為 **開啟 (Enabled)**。
 
 現在，用手機掃描該頁面上的 **QR code** 加入您的 LINE Bot 好友，傳送訊息給它即可體驗 AI 對話！
+
+---
+
+## Apps Script 部署（目前使用）
+
+Apps Script 程式位於 [`apps-script/Code.gs`](apps-script/Code.gs)，完整步驟見 [`apps-script/部署說明.md`](apps-script/%E9%83%A8%E7%BD%B2%E8%AA%AA%E6%98%8E.md)。
+
+1. 在 [Google Apps Script](https://script.google.com/home) 建立專案，將 `Code.gs` 貼入並儲存。
+2. 在「專案設定 → 指令碼屬性」設定 `LINE_CHANNEL_ACCESS_TOKEN`、`GEMINI_API_KEY`、`WEBHOOK_ACCESS_KEY`；金鑰不要放進 Repo。
+3. 部署為網頁應用程式，執行身分選「我」，存取對象選「任何人」。
+4. 將部署產生的 `/exec?k=你的存取金鑰` 設為 LINE Developers Console 的 Webhook URL，開啟 Use webhook。
+5. 按 Verify，然後用 LINE 傳 `/ping`。成功時機器人會回覆 Pong 訊息。
+
+目前 Apps Script Web App 已部署第 3 版；教師查詢的執行紀錄只記錄指定教師問題，不記錄 LINE 使用者 ID 或其他聊天內容。
+
+### 課堂實測截圖
+
+1. 在手機 LINE 對機器人傳送「東華大學陳文盛老師是誰？」；截圖需看得到回答與回答末尾的東華官方來源網址。
+2. 在電腦 Apps Script 專案左側選「執行項目」，開啟同一時間最新的 `doPost` 執行項目，截圖 `收到東華教師查詢：東華大學陳文盛老師是誰？` 這筆紀錄。
+3. 將手機回答與 Apps Script 執行紀錄畫面一併保留，避免截圖包含任何 API 金鑰或含有 `?k=` 的 Webhook URL。
 
 ---
 

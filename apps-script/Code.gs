@@ -50,6 +50,11 @@ function doPost(e) {
 function handleEvent_(event) {
   if (!event || event.type !== 'message' || !event.message || event.message.type !== 'text') return;
   const text = String(event.message.text || '').trim();
+  // Keep a minimal, sourceable execution trace for the NDHU teacher lookup
+  // assignment demo. Do not log LINE user IDs or unrelated chat messages.
+  if (text.indexOf('陳文盛') !== -1 || text.indexOf('文盛') !== -1) {
+    console.log('收到東華教師查詢：' + text);
+  }
   const userId = event.source && event.source.userId ? event.source.userId : 'default';
   let reply;
 
